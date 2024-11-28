@@ -2,7 +2,8 @@
 
 from flask import Flask, make_response, jsonify, request, session
 from flask_migrate import Migrate
-from flask_restful import Api, Resource
+from flask_restful import Api, Resource, reqparse
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from models import db, Article, User
 
@@ -17,6 +18,10 @@ migrate = Migrate(app, db)
 db.init_app(app)
 
 api = Api(app)
+
+with app.app_context():
+    session_factory = sessionmaker(bind=db.engine)
+ScopedSession = scoped_session(session_factory)
 
 class ClearSession(Resource):
 
@@ -48,10 +53,39 @@ class ShowArticle(Resource):
 
         return {'message': 'Maximum pageview limit reached'}, 401
 
+
+class Login(Resource):
+    def post(self):
+        parser = reqparse.RequestParser()
+        parser.add_argument("username", required=True, help="Username cannot be blank")
+        args = parser.parser_args()
+        user = User.query.filter_by(username=args["username"]).first()
+        if user:
+            session["user_id"] = user.id
+            return user.to_dict(), 200
+        return {"message": "User not found"}, 404
+
+class Logout(Resource):
+    def delete(self):
+        session.pop("user_id", None)
+        return "", 204
+
+class CheckSession(Resource):
+    def get(self):
+        user_id = session.get("user_id")
+        if user_id:
+            user = ScopedSession.query(User).get(user_id)
+            if user:
+                return user.to_dict(), 200
+            return {}, 401
+
+
 api.add_resource(ClearSession, '/clear')
 api.add_resource(IndexArticle, '/articles')
 api.add_resource(ShowArticle, '/articles/<int:id>')
-
+api.add_resource(Login, '/login')
+api.add_resource(Logout, '/logout')
+api.add_resource(CheckSession, '/check_session')
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
